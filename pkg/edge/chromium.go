@@ -27,6 +27,7 @@ type Chromium struct {
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
 	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
 	navigationCompleted   *ICoreWebView2NavigationCompletedEventHandler
+	newWindowRequested    *iCoreWebView2NewWindowRequestedEventHandler
 
 	environment *ICoreWebView2Environment
 
@@ -42,6 +43,11 @@ type Chromium struct {
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	AcceleratorKeyCallback       func(uint) bool
+	// NewWindowRequestedCallback fires when the page asks for a new window
+	// (window.open, target="_blank", etc). The handler receives the raw event
+	// args — call args.PutHandled(true) to suppress WebView2's default popup,
+	// then open the URL however you want.
+	NewWindowRequestedCallback func(args *ICoreWebView2NewWindowRequestedEventArgs)
 }
 
 func NewChromium() *Chromium {
@@ -64,6 +70,7 @@ func NewChromium() *Chromium {
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
+	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
 	return e
@@ -218,6 +225,11 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(e.navigationCompleted)),
 		uintptr(unsafe.Pointer(&token)),
 	)
+	_, _, _ = e.webview.vtbl.AddNewWindowRequested.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(e.newWindowRequested)),
+		uintptr(unsafe.Pointer(&token)),
+	)
 
 	_ = e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token)
 
@@ -339,6 +351,17 @@ func boolToInt(input bool) int {
 func (e *Chromium) NavigationCompleted(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs) uintptr {
 	if e.NavigationCompletedCallback != nil {
 		e.NavigationCompletedCallback(sender, args)
+	}
+	return 0
+}
+
+// NewWindowRequested is invoked by WebView2 when the page requests a popup
+// (window.open, target="_blank", ctrl+click, etc). If the host hasn't installed
+// a NewWindowRequestedCallback, this is a no-op and WebView2 falls back to its
+// default behavior (which often creates an empty popup window).
+func (e *Chromium) NewWindowRequested(sender *ICoreWebView2, args *ICoreWebView2NewWindowRequestedEventArgs) uintptr {
+	if e.NewWindowRequestedCallback != nil {
+		e.NewWindowRequestedCallback(args)
 	}
 	return 0
 }

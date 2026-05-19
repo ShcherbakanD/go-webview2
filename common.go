@@ -81,4 +81,12 @@ type WebView interface {
 	// f must be a function
 	// f must return either value and error or just error
 	Bind(name string, f interface{}) error
+
+	// OnNewWindowRequested installs a handler that is called when the page
+	// requests a new window (window.open, target="_blank", ctrl+click, etc).
+	// The default WebView2 popup is automatically suppressed before the
+	// handler runs; the handler decides what to do with the URI (open in a
+	// new webview2 window, in the system browser, navigate in place, etc).
+	// Pass nil to remove a previously installed handler.
+	OnNewWindowRequested(handler func(uri string))
 }

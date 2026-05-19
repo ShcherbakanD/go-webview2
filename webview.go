@@ -447,6 +447,24 @@ func (w *webview) Dispatch(f func()) {
 	_, _, _ = w32.User32PostThreadMessageW.Call(w.mainthread, w32.WMApp, 0, 0)
 }
 
+func (w *webview) OnNewWindowRequested(handler func(uri string)) {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return
+	}
+	if handler == nil {
+		chromium.NewWindowRequestedCallback = nil
+		return
+	}
+	chromium.NewWindowRequestedCallback = func(args *edge.ICoreWebView2NewWindowRequestedEventArgs) {
+		// Suppress WebView2's default popup window unconditionally — the host
+		// has opted into managing popups by installing a handler.
+		_ = args.PutHandled(true)
+		uri, _ := args.GetUri()
+		handler(uri)
+	}
+}
+
 func (w *webview) Bind(name string, f interface{}) error {
 	v := reflect.ValueOf(f)
 	if v.Kind() != reflect.Func {
