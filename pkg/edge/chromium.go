@@ -312,6 +312,13 @@ func (e *Chromium) Environment() *ICoreWebView2Environment {
 	return e.environment
 }
 
+// CoreWebView2 returns the underlying ICoreWebView2 pointer. Needed when a
+// host wants to hand this webview to another WebView2 instance via
+// NewWindowRequestedEventArgs.PutNewWindow.
+func (e *Chromium) CoreWebView2() *ICoreWebView2 {
+	return e.webview
+}
+
 // AcceleratorKeyPressed is called when an accelerator key is pressed.
 // If the AcceleratorKeyCallback method has been set, it will defer handling of the keypress
 // to the callback. That callback returns a bool indicating if the event was handled.

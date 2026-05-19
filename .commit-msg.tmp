@@ -1,0 +1,20 @@
+Expose PutNewWindow + CoreWebView2 for host-managed popups
+
+Adds the plumbing needed to support "deferred popup" pages — those that do:
+
+  const popup = window.open('placeholder', '_blank');
+  fetch(...).then(d => popup.location = d.realUrl);
+
+Previously the host had to either let WebView2 open its default empty popup
+or call PutHandled(true) and create its own window — but in the latter case
+the site has no live Window reference, so popup.location = ... fails with
+TypeError and the redirect never lands.
+
+New surface:
+- ICoreWebView2NewWindowRequestedEventArgs.PutNewWindow(*ICoreWebView2)
+- Chromium.CoreWebView2() accessor for the raw ICoreWebView2
+- WebView.OnNewWindowRequestedRaw — variant of OnNewWindowRequested that
+  does NOT auto-PutHandled, so the handler can choose between Handled
+  (suppress) or NewWindow (host-managed).
+- WebView.CoreWebView2() — convenience to fetch the raw pointer from a
+  high-level webview.

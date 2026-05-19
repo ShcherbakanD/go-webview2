@@ -97,6 +97,23 @@ func (i *ICoreWebView2NewWindowRequestedEventArgs) GetIsUserInitiated() (bool, e
 	return v != 0, nil
 }
 
+// PutNewWindow hands a host-created ICoreWebView2 back to WebView2 to use as
+// the new popup window. After this call (and Deferral.Complete if used),
+// WebView2 will treat newWindow as the popup target — JavaScript's window.open
+// returns a live Window reference backed by newWindow, and subsequent
+// popup.location / popup.postMessage / popup.close calls drive newWindow
+// normally instead of failing with TypeError.
+func (i *ICoreWebView2NewWindowRequestedEventArgs) PutNewWindow(newWindow *ICoreWebView2) error {
+	_, _, err := i.vtbl.PutNewWindow.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(newWindow)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return err
+	}
+	return nil
+}
+
 // GetDeferral lets the host complete the event asynchronously. Caller must
 // call Deferral.Complete() and Release() when done.
 func (i *ICoreWebView2NewWindowRequestedEventArgs) GetDeferral() (*ICoreWebView2Deferral, error) {

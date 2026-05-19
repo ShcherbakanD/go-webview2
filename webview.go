@@ -465,6 +465,26 @@ func (w *webview) OnNewWindowRequested(handler func(uri string)) {
 	}
 }
 
+func (w *webview) OnNewWindowRequestedRaw(handler func(args *edge.ICoreWebView2NewWindowRequestedEventArgs)) {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return
+	}
+	if handler == nil {
+		chromium.NewWindowRequestedCallback = nil
+		return
+	}
+	chromium.NewWindowRequestedCallback = handler
+}
+
+func (w *webview) CoreWebView2() *edge.ICoreWebView2 {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return nil
+	}
+	return chromium.CoreWebView2()
+}
+
 func (w *webview) Bind(name string, f interface{}) error {
 	v := reflect.ValueOf(f)
 	if v.Kind() != reflect.Func {

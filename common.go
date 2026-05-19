@@ -1,6 +1,10 @@
 package webview2
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/jchv/go-webview2/pkg/edge"
+)
 
 // This is copied from webview/webview.
 // The documentation is included for convenience.
@@ -88,5 +92,21 @@ type WebView interface {
 	// handler runs; the handler decides what to do with the URI (open in a
 	// new webview2 window, in the system browser, navigate in place, etc).
 	// Pass nil to remove a previously installed handler.
+	//
+	// Use OnNewWindowRequestedRaw when you need to hand a real popup window
+	// back to WebView2 (so JavaScript's window.open returns a live Window).
 	OnNewWindowRequested(handler func(uri string))
+
+	// OnNewWindowRequestedRaw is the low-level variant of
+	// OnNewWindowRequested. The handler receives the raw event args and is
+	// responsible for one of: args.PutHandled(true) (suppress popup),
+	// args.PutNewWindow(child) (host-managed popup so window.open returns a
+	// live Window ref), or doing nothing (default WebView2 behavior).
+	// Pass nil to remove a previously installed handler.
+	OnNewWindowRequestedRaw(handler func(args *edge.ICoreWebView2NewWindowRequestedEventArgs))
+
+	// CoreWebView2 returns the raw ICoreWebView2 pointer backing this
+	// webview. Mainly useful for handing the webview to another instance
+	// via NewWindowRequestedEventArgs.PutNewWindow.
+	CoreWebView2() *edge.ICoreWebView2
 }
