@@ -25,9 +25,10 @@ type Chromium struct {
 	webMessageReceived    *iCoreWebView2WebMessageReceivedEventHandler
 	permissionRequested   *iCoreWebView2PermissionRequestedEventHandler
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
-	acceleratorKeyPressed *ICoreWebView2AcceleratorKeyPressedEventHandler
-	navigationCompleted   *ICoreWebView2NavigationCompletedEventHandler
-	newWindowRequested    *iCoreWebView2NewWindowRequestedEventHandler
+	acceleratorKeyPressed    *ICoreWebView2AcceleratorKeyPressedEventHandler
+	navigationCompleted      *ICoreWebView2NavigationCompletedEventHandler
+	frameNavigationCompleted *iCoreWebView2FrameNavigationCompletedEventHandler
+	newWindowRequested       *iCoreWebView2NewWindowRequestedEventHandler
 
 	environment *ICoreWebView2Environment
 
@@ -42,7 +43,12 @@ type Chromium struct {
 	MessageCallback              func(string)
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
-	AcceleratorKeyCallback       func(uint) bool
+	// FrameNavigationCompletedCallback fires when any sub-frame (iframe)
+	// finishes a navigation. args.IsSuccess() tells whether the load
+	// succeeded (false on 4xx/5xx HTTP or network errors). Useful for
+	// implementing retry logic on third-party iframes that may flap.
+	FrameNavigationCompletedCallback func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
+	AcceleratorKeyCallback           func(uint) bool
 	// NewWindowRequestedCallback fires when the page asks for a new window
 	// (window.open, target="_blank", etc). The handler receives the raw event
 	// args — call args.PutHandled(true) to suppress WebView2's default popup,
@@ -70,6 +76,7 @@ func NewChromium() *Chromium {
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
+	e.frameNavigationCompleted = newICoreWebView2FrameNavigationCompletedEventHandler(e)
 	e.newWindowRequested = newICoreWebView2NewWindowRequestedEventHandler(e)
 	e.permissions = make(map[CoreWebView2PermissionKind]CoreWebView2PermissionState)
 
@@ -225,6 +232,11 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(e.navigationCompleted)),
 		uintptr(unsafe.Pointer(&token)),
 	)
+	_, _, _ = e.webview.vtbl.AddFrameNavigationCompleted.Call(
+		uintptr(unsafe.Pointer(e.webview)),
+		uintptr(unsafe.Pointer(e.frameNavigationCompleted)),
+		uintptr(unsafe.Pointer(&token)),
+	)
 	_, _, _ = e.webview.vtbl.AddNewWindowRequested.Call(
 		uintptr(unsafe.Pointer(e.webview)),
 		uintptr(unsafe.Pointer(e.newWindowRequested)),
@@ -358,6 +370,15 @@ func boolToInt(input bool) int {
 func (e *Chromium) NavigationCompleted(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs) uintptr {
 	if e.NavigationCompletedCallback != nil {
 		e.NavigationCompletedCallback(sender, args)
+	}
+	return 0
+}
+
+// FrameNavigationCompleted is the impl-side dispatch for sub-frame navigation
+// completion events; routes to FrameNavigationCompletedCallback if set.
+func (e *Chromium) FrameNavigationCompleted(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs) uintptr {
+	if e.FrameNavigationCompletedCallback != nil {
+		e.FrameNavigationCompletedCallback(sender, args)
 	}
 	return 0
 }

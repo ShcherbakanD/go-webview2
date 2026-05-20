@@ -124,4 +124,11 @@ type WebView interface {
 	// filters by request type (use COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL
 	// to match everything).
 	AddWebResourceRequestedFilter(uri string, ctx edge.COREWEBVIEW2_WEB_RESOURCE_CONTEXT)
+
+	// OnFrameNavigationCompleted installs a handler invoked when any
+	// sub-frame (iframe) finishes a navigation. args.IsSuccess() reports
+	// success/failure; on failure args.WebErrorStatus() gives the reason
+	// (HttpInvalidServerResponse for 5xx). Useful for retrying flaky
+	// third-party iframes. Pass nil to remove a previously installed handler.
+	OnFrameNavigationCompleted(handler func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2NavigationCompletedEventArgs))
 }
