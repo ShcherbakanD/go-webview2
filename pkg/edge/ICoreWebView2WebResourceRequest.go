@@ -26,6 +26,25 @@ func (i *ICoreWebView2WebResourceRequest) AddRef() uintptr {
 	return r
 }
 
+// PutUri rewrites the request URI before WebView2 sends it. Useful for
+// inserting cache-busting query parameters from inside a
+// WebResourceRequested handler — e.g. when a third-party backend caches
+// responses by URL and would otherwise return a stale single-use token.
+func (i *ICoreWebView2WebResourceRequest) PutUri(uri string) error {
+	u, err := windows.UTF16PtrFromString(uri)
+	if err != nil {
+		return err
+	}
+	_, _, callErr := i.vtbl.PutUri.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(u)),
+	)
+	if callErr != windows.ERROR_SUCCESS {
+		return callErr
+	}
+	return nil
+}
+
 func (i *ICoreWebView2WebResourceRequest) GetUri() (string, error) {
 	var err error
 	// Create *uint16 to hold result
