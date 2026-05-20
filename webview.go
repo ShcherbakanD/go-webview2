@@ -485,6 +485,22 @@ func (w *webview) CoreWebView2() *edge.ICoreWebView2 {
 	return chromium.CoreWebView2()
 }
 
+func (w *webview) OnWebResourceRequested(handler func(req *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs)) {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return
+	}
+	chromium.WebResourceRequestedCallback = handler
+}
+
+func (w *webview) AddWebResourceRequestedFilter(uri string, ctx edge.COREWEBVIEW2_WEB_RESOURCE_CONTEXT) {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return
+	}
+	chromium.AddWebResourceRequestedFilter(uri, ctx)
+}
+
 func (w *webview) Bind(name string, f interface{}) error {
 	v := reflect.ValueOf(f)
 	if v.Kind() != reflect.Func {

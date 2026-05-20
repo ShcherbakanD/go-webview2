@@ -109,4 +109,19 @@ type WebView interface {
 	// webview. Mainly useful for handing the webview to another instance
 	// via NewWindowRequestedEventArgs.PutNewWindow.
 	CoreWebView2() *edge.ICoreWebView2
+
+	// OnWebResourceRequested installs a handler invoked before any matching
+	// request leaves WebView2. The handler can mutate request headers
+	// (req.GetHeaders().SetHeader / RemoveHeader) to spoof or strip
+	// fingerprint headers like sec-ch-ua* that WebView2 hard-codes with
+	// "Microsoft Edge WebView2" branding. Must be paired with at least one
+	// AddWebResourceRequestedFilter — without a filter the event never fires.
+	// Pass nil to remove a previously installed handler.
+	OnWebResourceRequested(handler func(req *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs))
+
+	// AddWebResourceRequestedFilter narrows which requests fire the
+	// WebResourceRequested handler. Pattern supports * wildcards; context
+	// filters by request type (use COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL
+	// to match everything).
+	AddWebResourceRequestedFilter(uri string, ctx edge.COREWEBVIEW2_WEB_RESOURCE_CONTEXT)
 }
