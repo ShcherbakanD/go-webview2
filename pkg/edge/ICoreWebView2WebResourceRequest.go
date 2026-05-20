@@ -41,3 +41,20 @@ func (i *ICoreWebView2WebResourceRequest) GetUri() (string, error) {
 	windows.CoTaskMemFree(unsafe.Pointer(_uri))
 	return uri, nil
 }
+
+// GetHeaders returns the mutable request headers. The host can call
+// SetHeader / RemoveHeader on the returned object inside a
+// WebResourceRequested handler to rewrite the outgoing request — useful
+// for spoofing UA Client Hints (sec-ch-ua*) that WebView2 otherwise
+// always sends with "Microsoft Edge WebView2" branding.
+func (i *ICoreWebView2WebResourceRequest) GetHeaders() (*ICoreWebView2HttpRequestHeaders, error) {
+	var headers *ICoreWebView2HttpRequestHeaders
+	_, _, err := i.vtbl.GetHeaders.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&headers)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return nil, err
+	}
+	return headers, nil
+}
