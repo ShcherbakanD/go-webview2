@@ -501,6 +501,14 @@ func (w *webview) AddWebResourceRequestedFilter(uri string, ctx edge.COREWEBVIEW
 	chromium.AddWebResourceRequestedFilter(uri, ctx)
 }
 
+func (w *webview) OnWebResourceResponseReceived(handler func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2WebResourceResponseReceivedEventArgs)) {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return
+	}
+	chromium.WebResourceResponseReceivedCallback = handler
+}
+
 func (w *webview) OnFrameNavigationCompleted(handler func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2NavigationCompletedEventArgs)) {
 	chromium, ok := w.browser.(*edge.Chromium)
 	if !ok {

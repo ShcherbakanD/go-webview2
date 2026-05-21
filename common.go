@@ -125,6 +125,15 @@ type WebView interface {
 	// to match everything).
 	AddWebResourceRequestedFilter(uri string, ctx edge.COREWEBVIEW2_WEB_RESOURCE_CONTEXT)
 
+	// OnWebResourceResponseReceived installs a handler invoked after WebView2
+	// receives a response for any matching request (filters set via
+	// AddWebResourceRequestedFilter apply here too). Observational only —
+	// the response has already been delivered to the renderer. Useful for
+	// logging the real HTTP status WebView2 saw (e.g. distinguishing
+	// vdnsport 500/0106 rejections from successful 200s in failure
+	// diagnostics). Pass nil to remove a previously installed handler.
+	OnWebResourceResponseReceived(handler func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2WebResourceResponseReceivedEventArgs))
+
 	// OnFrameNavigationCompleted installs a handler invoked when any
 	// sub-frame (iframe) finishes a navigation. args.IsSuccess() reports
 	// success/failure; on failure args.WebErrorStatus() gives the reason

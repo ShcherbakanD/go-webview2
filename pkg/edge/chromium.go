@@ -25,6 +25,7 @@ type Chromium struct {
 	webMessageReceived    *iCoreWebView2WebMessageReceivedEventHandler
 	permissionRequested   *iCoreWebView2PermissionRequestedEventHandler
 	webResourceRequested  *iCoreWebView2WebResourceRequestedEventHandler
+	webResourceResponseReceived *iCoreWebView2WebResourceResponseReceivedEventHandler
 	acceleratorKeyPressed    *ICoreWebView2AcceleratorKeyPressedEventHandler
 	navigationCompleted      *ICoreWebView2NavigationCompletedEventHandler
 	frameNavigationCompleted *iCoreWebView2FrameNavigationCompletedEventHandler
@@ -42,6 +43,12 @@ type Chromium struct {
 	// Callbacks
 	MessageCallback              func(string)
 	WebResourceRequestedCallback func(request *ICoreWebView2WebResourceRequest, args *ICoreWebView2WebResourceRequestedEventArgs)
+	// WebResourceResponseReceivedCallback fires after WebView2 receives a
+	// response for any matching request. Observational only — the response
+	// has already been delivered. Use args.GetResponse().GetStatusCode() to
+	// log the real HTTP status WebView2 saw (the Go-side probe through the
+	// same proxy may differ because of TLS/header fingerprint).
+	WebResourceResponseReceivedCallback func(sender *ICoreWebView2, args *ICoreWebView2WebResourceResponseReceivedEventArgs)
 	NavigationCompletedCallback  func(sender *ICoreWebView2, args *ICoreWebView2NavigationCompletedEventArgs)
 	// FrameNavigationCompletedCallback fires when any sub-frame (iframe)
 	// finishes a navigation. args.IsSuccess() tells whether the load
@@ -74,6 +81,7 @@ func NewChromium() *Chromium {
 	e.webMessageReceived = newICoreWebView2WebMessageReceivedEventHandler(e)
 	e.permissionRequested = newICoreWebView2PermissionRequestedEventHandler(e)
 	e.webResourceRequested = newICoreWebView2WebResourceRequestedEventHandler(e)
+	e.webResourceResponseReceived = newICoreWebView2WebResourceResponseReceivedEventHandler(e)
 	e.acceleratorKeyPressed = newICoreWebView2AcceleratorKeyPressedEventHandler(e)
 	e.navigationCompleted = newICoreWebView2NavigationCompletedEventHandler(e)
 	e.frameNavigationCompleted = newICoreWebView2FrameNavigationCompletedEventHandler(e)
@@ -243,6 +251,14 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		uintptr(unsafe.Pointer(&token)),
 	)
 
+	// WebResourceResponseReceived is only on ICoreWebView2_2 (1.0.705.50+).
+	// QI to the _2 interface; skip silently on older runtimes.
+	if v2 := e.webview.GetICoreWebView2_2(); v2 != nil {
+		if err := v2.AddWebResourceResponseReceived(e.webResourceResponseReceived, &token); err != nil {
+			log.Printf("AddWebResourceResponseReceived failed: %v", err)
+		}
+	}
+
 	_ = e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token)
 
 	atomic.StoreUintptr(&e.inited, 1)
@@ -309,6 +325,13 @@ func (e *Chromium) WebResourceRequested(sender *ICoreWebView2, args *ICoreWebVie
 	}
 	if e.WebResourceRequestedCallback != nil {
 		e.WebResourceRequestedCallback(req, args)
+	}
+	return 0
+}
+
+func (e *Chromium) WebResourceResponseReceived(sender *ICoreWebView2, args *ICoreWebView2WebResourceResponseReceivedEventArgs) uintptr {
+	if e.WebResourceResponseReceivedCallback != nil {
+		e.WebResourceResponseReceivedCallback(sender, args)
 	}
 	return 0
 }
