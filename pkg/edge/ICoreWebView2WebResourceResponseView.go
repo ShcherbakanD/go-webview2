@@ -49,3 +49,17 @@ func (i *ICoreWebView2WebResourceResponseView) GetReasonPhrase() (string, error)
 	windows.CoTaskMemFree(unsafe.Pointer(raw))
 	return s, nil
 }
+
+// GetHeaders returns the response's header collection. Callers can use
+// GetHeader to fetch individual entries (e.g. X-Request-Id) for diagnostics.
+func (i *ICoreWebView2WebResourceResponseView) GetHeaders() (*ICoreWebView2HttpResponseHeaders, error) {
+	var headers *ICoreWebView2HttpResponseHeaders
+	_, _, err := i.vtbl.GetHeaders.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&headers)),
+	)
+	if err != windows.ERROR_SUCCESS {
+		return nil, err
+	}
+	return headers, nil
+}
