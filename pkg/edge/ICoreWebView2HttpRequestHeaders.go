@@ -60,6 +60,31 @@ func (h *ICoreWebView2HttpRequestHeaders) RemoveHeader(name string) error {
 	return nil
 }
 
+// GetHeader returns the value of the named header, or empty string if absent.
+// Useful for forwarding original request headers (UA, Referer, Cookie) when
+// the host fulfills the request from Go inside a WebResourceRequested handler.
+func (h *ICoreWebView2HttpRequestHeaders) GetHeader(name string) (string, error) {
+	n, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return "", err
+	}
+	var raw *uint16
+	_, _, callErr := h.vtbl.GetHeader.Call(
+		uintptr(unsafe.Pointer(h)),
+		uintptr(unsafe.Pointer(n)),
+		uintptr(unsafe.Pointer(&raw)),
+	)
+	if callErr != windows.ERROR_SUCCESS {
+		return "", callErr
+	}
+	if raw == nil {
+		return "", nil
+	}
+	s := windows.UTF16PtrToString(raw)
+	windows.CoTaskMemFree(unsafe.Pointer(raw))
+	return s, nil
+}
+
 // Contains reports whether a header with the given name is present.
 func (h *ICoreWebView2HttpRequestHeaders) Contains(name string) (bool, error) {
 	n, err := windows.UTF16PtrFromString(name)

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/jchv/go-webview2/internal/w32"
@@ -56,7 +57,17 @@ type webview struct {
 	m          sync.Mutex
 	bindings   map[string]interface{}
 	dispatchq  []func()
+
+	// Deferred close (see OnClose). onClose/closing are touched only on the UI
+	// thread (wndproc); closeOnce makes finishClose safe from any goroutine.
+	onClose      func(done func())
+	closing      bool
+	closeOnce    sync.Once
+	closeTimeout time.Duration
 }
+
+// defaultCloseTimeout bounds how long an OnClose hook may hold the window open.
+const defaultCloseTimeout = 2 * time.Second
 
 type WindowOptions struct {
 	Title  string
@@ -64,6 +75,11 @@ type WindowOptions struct {
 	Height uint
 	IconId uint
 	Center bool
+
+	// CloseTimeout is the hard deadline for an OnClose hook: if the hook has
+	// not called done() by then, the window is destroyed anyway. Zero means
+	// defaultCloseTimeout (2s). Ignored when no hook is installed.
+	CloseTimeout time.Duration
 }
 
 type WebViewOptions struct {
@@ -98,6 +114,10 @@ func NewWithOptions(options WebViewOptions) WebView {
 	w := &webview{}
 	w.bindings = map[string]interface{}{}
 	w.autofocus = options.AutoFocus
+	w.closeTimeout = options.WindowOptions.CloseTimeout
+	if w.closeTimeout <= 0 {
+		w.closeTimeout = defaultCloseTimeout
+	}
 
 	chromium := edge.NewChromium()
 	chromium.MessageCallback = w.msgcb
@@ -222,6 +242,12 @@ func (w *webview) callbinding(d rpcMessage) (interface{}, error) {
 func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 	if w, ok := getWindowContext(hwnd).(*webview); ok {
 		switch msg {
+		case w32.WMApp:
+			// Wakeup from Dispatch. Handled here rather than only in Run so it
+			// survives the nested message loops WebView2 runs during
+			// initialization and modal dialogs — those pump the queue with their
+			// own GetMessage and would otherwise swallow the notification.
+			w.drainDispatch()
 		case w32.WMMove, w32.WMMoving:
 			_ = w.browser.NotifyParentWindowPositionChanged()
 		case w32.WMNCLButtonDown:
@@ -238,6 +264,20 @@ func wndproc(hwnd, msg, wp, lp uintptr) uintptr {
 				w.browser.Focus()
 			}
 		case w32.WMClose:
+			if w.onClose != nil {
+				// Deferred close: keep the window (and the message loop in Run)
+				// alive until the hook reports done or the deadline fires. Returning
+				// from wndproc here, instead of pumping a nested loop, lets the
+				// regular loop deliver WebView2's async completions (e.g.
+				// GetCookies) with no re-entrancy.
+				if w.closing {
+					return 0 // repeated X / Alt+F4 while the hook is running
+				}
+				w.closing = true
+				time.AfterFunc(w.closeTimeout, w.finishClose)
+				w.runCloseHook()
+				return 0
+			}
 			_, _, _ = w32.User32DestroyWindow.Call(hwnd)
 		case w32.WMDestroy:
 			w.Terminate()
@@ -348,6 +388,53 @@ func (w *webview) Destroy() {
 	_, _, _ = w32.User32PostMessageW.Call(w.hwnd, w32.WMClose, 0, 0)
 }
 
+// OnClose installs (or, with nil, removes) the deferred-close hook. See the
+// WebView interface documentation for the contract.
+func (w *webview) OnClose(handler func(done func())) {
+	w.onClose = handler
+}
+
+// runCloseHook invokes the OnClose hook, guaranteeing that a panicking hook
+// cannot wedge the window: the deadline timer is already armed and we also
+// finish immediately on panic.
+func (w *webview) runCloseHook() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("webview2: OnClose hook panicked: %v", r)
+			w.finishClose()
+		}
+	}()
+	w.onClose(w.finishClose)
+}
+
+// finishClose completes a deferred close exactly once: it schedules
+// DestroyWindow on the UI thread, which leads to WM_DESTROY -> Terminate ->
+// WM_QUIT, exactly as a plain WM_CLOSE did before the hook existed. Safe to
+// call from any goroutine and any number of times.
+func (w *webview) finishClose() {
+	w.closeOnce.Do(func() {
+		w.Dispatch(func() {
+			_, _, _ = w32.User32DestroyWindow.Call(w.hwnd)
+		})
+	})
+}
+
+func (w *webview) GetCookies(uri string, cb func(cookies []edge.Cookie, err error)) error {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return edge.ErrCookieManagerUnavailable
+	}
+	return chromium.GetCookies(uri, cb)
+}
+
+func (w *webview) AddOrUpdateCookie(c edge.Cookie) error {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return edge.ErrCookieManagerUnavailable
+	}
+	return chromium.AddOrUpdateCookie(c)
+}
+
 func (w *webview) Run() {
 	var msg w32.Msg
 	for {
@@ -358,13 +445,10 @@ func (w *webview) Run() {
 			0,
 		)
 		if msg.Message == w32.WMApp {
-			w.m.Lock()
-			q := append([]func(){}, w.dispatchq...)
-			w.dispatchq = []func(){}
-			w.m.Unlock()
-			for _, v := range q {
-				v()
-			}
+			// Dispatch now posts WM_APP to the window, so this normally runs
+			// from wndproc below. Kept for the pre-window fallback path and for
+			// any thread message still in flight.
+			w.drainDispatch()
 		} else if msg.Message == w32.WMQuit {
 			return
 		}
@@ -444,7 +528,40 @@ func (w *webview) Dispatch(f func()) {
 	w.m.Lock()
 	w.dispatchq = append(w.dispatchq, f)
 	w.m.Unlock()
+
+	// PostMessageW to the window, not PostThreadMessageW.
+	//
+	// A thread message (hwnd == 0) is never routed to a window, so it is only
+	// ever seen by the loop in Run(). WebView2 runs nested modal message loops
+	// of its own — during initialization, while showing dialogs, during drag &
+	// drop — and such a loop pumps the queue with its own GetMessage, swallows
+	// the WM_APP and drops it on the floor. The queued closure then sits in
+	// dispatchq until the *next* Dispatch happens to arrive outside a nested
+	// loop, which for a one-shot call like Navigate means it may never run.
+	//
+	// A window message reaches wndproc through any loop that calls
+	// DispatchMessageW, so the wakeup survives nested loops. Both wndproc and
+	// Run drain the same mutex-guarded queue, so a doubled delivery is a no-op.
+	//
+	// Falls back to the thread message if the window does not exist yet.
+	if w.hwnd != 0 {
+		_, _, _ = w32.User32PostMessageW.Call(w.hwnd, w32.WMApp, 0, 0)
+		return
+	}
 	_, _, _ = w32.User32PostThreadMessageW.Call(w.mainthread, w32.WMApp, 0, 0)
+}
+
+// drainDispatch runs everything queued by Dispatch. Safe to call from both the
+// main loop and wndproc: the queue is swapped under the mutex, so each closure
+// runs exactly once.
+func (w *webview) drainDispatch() {
+	w.m.Lock()
+	q := w.dispatchq
+	w.dispatchq = nil
+	w.m.Unlock()
+	for _, v := range q {
+		v()
+	}
 }
 
 func (w *webview) OnNewWindowRequested(handler func(uri string)) {
@@ -483,6 +600,18 @@ func (w *webview) CoreWebView2() *edge.ICoreWebView2 {
 		return nil
 	}
 	return chromium.CoreWebView2()
+}
+
+// Environment exposes the underlying ICoreWebView2Environment so hosts can call
+// factory methods like CreateWebResourceResponse from inside their
+// WebResourceRequested handlers (i.e. respond to a request with a host-built
+// response instead of letting the browser fetch it).
+func (w *webview) Environment() *edge.ICoreWebView2Environment {
+	chromium, ok := w.browser.(*edge.Chromium)
+	if !ok {
+		return nil
+	}
+	return chromium.Environment()
 }
 
 func (w *webview) OnWebResourceRequested(handler func(req *edge.ICoreWebView2WebResourceRequest, args *edge.ICoreWebView2WebResourceRequestedEventArgs)) {

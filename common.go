@@ -110,6 +110,12 @@ type WebView interface {
 	// via NewWindowRequestedEventArgs.PutNewWindow.
 	CoreWebView2() *edge.ICoreWebView2
 
+	// Environment returns the ICoreWebView2Environment backing this webview.
+	// Useful for calling factory methods like CreateWebResourceResponse from
+	// inside a WebResourceRequested handler when the host wants to answer the
+	// request itself instead of letting the browser fetch it.
+	Environment() *edge.ICoreWebView2Environment
+
 	// OnWebResourceRequested installs a handler invoked before any matching
 	// request leaves WebView2. The handler can mutate request headers
 	// (req.GetHeaders().SetHeader / RemoveHeader) to spoof or strip
@@ -140,4 +146,27 @@ type WebView interface {
 	// (HttpInvalidServerResponse for 5xx). Useful for retrying flaky
 	// third-party iframes. Pass nil to remove a previously installed handler.
 	OnFrameNavigationCompleted(handler func(sender *edge.ICoreWebView2, args *edge.ICoreWebView2NavigationCompletedEventArgs))
+
+	// GetCookies asynchronously fetches the cookies the profile would send with
+	// a request to uri (empty uri = every cookie in the profile). cb runs on the
+	// UI thread once WebView2 has the list and is never called if GetCookies
+	// returns an error (e.g. edge.ErrCookieManagerUnavailable on runtimes older
+	// than 1.0.705.50).
+	GetCookies(uri string, cb func(cookies []edge.Cookie, err error)) error
+
+	// AddOrUpdateCookie inserts a SESSION cookie into the profile's cookie
+	// store (Expires is ignored; see edge.ICoreWebView2Cookie for why). Must be
+	// called on the UI thread — typically right after NewWithOptions returns
+	// and before the first Navigate, so the page sees the cookie from its very
+	// first request.
+	AddOrUpdateCookie(c edge.Cookie) error
+
+	// OnClose installs a hook that runs when the user closes the native window
+	// (WM_CLOSE). While a hook is installed the window is NOT destroyed until
+	// the hook calls done(), or WindowOptions.CloseTimeout elapses — whichever
+	// comes first. The hook runs on the UI thread and may start asynchronous
+	// work (such as GetCookies) whose completion calls done(). done is
+	// idempotent and safe to call from any goroutine. The hook must not call
+	// Destroy() itself. Pass nil to remove the hook.
+	OnClose(handler func(done func()))
 }

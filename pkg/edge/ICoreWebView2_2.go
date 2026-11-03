@@ -56,3 +56,21 @@ func (i *ICoreWebView2_2) AddWebResourceResponseReceived(handler *iCoreWebView2W
 	}
 	return nil
 }
+
+// GetCookieManager returns the profile-wide cookie store. The returned object
+// is reference-counted by WebView2; the host keeps it for the lifetime of the
+// webview and never needs to Release it.
+func (i *ICoreWebView2_2) GetCookieManager() (*ICoreWebView2CookieManager, error) {
+	var cm *ICoreWebView2CookieManager
+	r1, _, _ := i.vtbl.GetCookieManager.Call(
+		uintptr(unsafe.Pointer(i)),
+		uintptr(unsafe.Pointer(&cm)),
+	)
+	if err := hr(r1); err != nil {
+		return nil, err
+	}
+	if cm == nil {
+		return nil, ErrCookieManagerUnavailable
+	}
+	return cm, nil
+}

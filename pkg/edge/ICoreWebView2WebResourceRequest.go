@@ -22,8 +22,18 @@ type ICoreWebView2WebResourceRequest struct {
 }
 
 func (i *ICoreWebView2WebResourceRequest) AddRef() uintptr {
-	r, _, _ := i.vtbl.AddRef.Call()
+	// The `this` pointer is not optional: without it AddRef runs against
+	// whatever happened to be in the register.
+	r, _, _ := i.vtbl.AddRef.Call(uintptr(unsafe.Pointer(i)))
 	return r
+}
+
+// Release drops the reference obtained from
+// ICoreWebView2WebResourceRequestedEventArgs.GetRequest. Failing to call it
+// leaks one COM object per intercepted request.
+func (i *ICoreWebView2WebResourceRequest) Release() error {
+	r1, _, _ := i.vtbl.Release.Call(uintptr(unsafe.Pointer(i)))
+	return hr(r1)
 }
 
 // PutUri rewrites the request URI before WebView2 sends it. Useful for
@@ -35,25 +45,21 @@ func (i *ICoreWebView2WebResourceRequest) PutUri(uri string) error {
 	if err != nil {
 		return err
 	}
-	_, _, callErr := i.vtbl.PutUri.Call(
+	r1, _, _ := i.vtbl.PutUri.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(u)),
 	)
-	if callErr != windows.ERROR_SUCCESS {
-		return callErr
-	}
-	return nil
+	return hr(r1)
 }
 
 func (i *ICoreWebView2WebResourceRequest) GetUri() (string, error) {
-	var err error
 	// Create *uint16 to hold result
 	var _uri *uint16
-	_, _, err = i.vtbl.GetUri.Call(
+	r1, _, _ := i.vtbl.GetUri.Call(
 		uintptr(unsafe.Pointer(i)),
 		uintptr(unsafe.Pointer(&_uri)),
 	)
-	if err != windows.ERROR_SUCCESS {
+	if err := hr(r1); err != nil {
 		return "", err
 	} // Get result and cleanup
 	uri := windows.UTF16PtrToString(_uri)

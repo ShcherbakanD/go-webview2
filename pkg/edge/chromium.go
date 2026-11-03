@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -32,6 +33,14 @@ type Chromium struct {
 	newWindowRequested       *iCoreWebView2NewWindowRequestedEventHandler
 
 	environment *ICoreWebView2Environment
+
+	// cookieManager is acquired in CreateCoreWebView2ControllerCompleted via
+	// ICoreWebView2_2; nil on runtimes older than 1.0.705.50.
+	cookieManager *ICoreWebView2CookieManager
+	// pendingGetCookies keeps GetCookies completion handlers reachable until
+	// WebView2 invokes them — the runtime only holds a raw pointer.
+	pendingGetCookies map[*iCoreWebView2GetCookiesCompletedHandler]struct{}
+	pendingMu         sync.Mutex
 
 	// Settings
 	DataPath string
@@ -257,6 +266,14 @@ func (e *Chromium) CreateCoreWebView2ControllerCompleted(res uintptr, controller
 		if err := v2.AddWebResourceResponseReceived(e.webResourceResponseReceived, &token); err != nil {
 			log.Printf("AddWebResourceResponseReceived failed: %v", err)
 		}
+		// Cookie manager is also an ICoreWebView2_2 feature. Keep going without
+		// it on failure: GetCookies/AddOrUpdateCookie then report
+		// ErrCookieManagerUnavailable instead of the whole webview dying.
+		if cm, err := v2.GetCookieManager(); err != nil {
+			log.Printf("webview2: GetCookieManager failed: %v", err)
+		} else {
+			e.cookieManager = cm
+		}
 	}
 
 	_ = e.controller.AddAcceleratorKeyPressed(e.acceleratorKeyPressed, &token)
@@ -320,9 +337,17 @@ func (e *Chromium) PermissionRequested(_ *ICoreWebView2, args *iCoreWebView2Perm
 
 func (e *Chromium) WebResourceRequested(sender *ICoreWebView2, args *ICoreWebView2WebResourceRequestedEventArgs) uintptr {
 	req, err := args.GetRequest()
-	if err != nil {
-		log.Fatal(err)
+	if err != nil || req == nil {
+		// Never kill the process from an event handler: this runs for every
+		// matched resource load, and taking the app down over one failed request
+		// is far worse than letting that request proceed unmodified.
+		log.Printf("webview2: WebResourceRequested: GetRequest failed: %v", err)
+		return 0
 	}
+	// GetRequest hands back an owned reference; without this the host leaks one
+	// COM object per intercepted request.
+	defer func() { _ = req.Release() }()
+
 	if e.WebResourceRequestedCallback != nil {
 		e.WebResourceRequestedCallback(req, args)
 	}
@@ -337,9 +362,14 @@ func (e *Chromium) WebResourceResponseReceived(sender *ICoreWebView2, args *ICor
 }
 
 func (e *Chromium) AddWebResourceRequestedFilter(filter string, ctx COREWEBVIEW2_WEB_RESOURCE_CONTEXT) {
-	err := e.webview.AddWebResourceRequestedFilter(filter, ctx)
-	if err != nil {
-		log.Fatal(err)
+	if e.webview == nil {
+		log.Printf("webview2: AddWebResourceRequestedFilter(%q): webview not initialized", filter)
+		return
+	}
+	// Logged, not fatal: a filter that fails to register costs the host the
+	// interception it wanted, which is not worth killing the app over.
+	if err := e.webview.AddWebResourceRequestedFilter(filter, ctx); err != nil {
+		log.Printf("webview2: AddWebResourceRequestedFilter(%q) failed: %v", filter, err)
 	}
 }
 
